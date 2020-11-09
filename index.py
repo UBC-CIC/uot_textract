@@ -9,7 +9,6 @@ import logging
 import base64 
 import os 
 import glob
-import uuid 
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -21,12 +20,19 @@ def get_pages(pdf_path, pages, output_path):
     logger.info(f'{pdf_path} to {output_path}')
     pdf_reader = PdfFileReader(pdf_path)
     pdf_writer = PdfFileWriter()
-    for page in pages: 
-        if not isinstance(page, int):
-            page = int(page)-1
-        p = pdf_reader.getPage(page-1)
-        pdf_writer.addPage(p)
-        logger.info(f'Appending Page#{page}')
+    if not pages: 
+        # if user has not specified page numbers, extract from all pages
+        for page in range(pdf_reader.getNumPages):
+            p = pdf_reader.getPage(page)
+            pdf_writer.addPage(p)
+            logger.info(f'Appending Page#{page}')
+    else: 
+        for page in pages: 
+            if not isinstance(page, int):
+                page = int(page)
+            p = pdf_reader.getPage(page-1)
+            pdf_writer.addPage(p)
+            logger.info(f'Appending Page#{page}')
     with open(output_path, 'wb') as out: 
         pdf_writer.write(out)
 
@@ -61,14 +67,14 @@ def textract_img(path_arr):
 def insert_into_s3(obj, bucket, objname): 
     s3_client = boto3.client('s3')
     s3_client.put_object(Body=obj, Bucket=bucket, Key=objname)
-    logger.info("Inserted into S3")
+    logger.info(f'Inserted {objname} to S3 bucket {bucket}')
 
 def get_s3_object(bucket, key, filename):
     s3_client = boto3.client('s3')
     try:    
         with open(filename, 'wb') as f:
             s3_client.download_fileobj(bucket, key, f)
-    except botocore.exceptions.ClientError as e: 
+    except ClientError as e: 
         raise e 
 
 def get_json_s3(bucket, key):
@@ -157,6 +163,14 @@ def generate_table_csv(table_result, blocks_map, table_index, confidence):
     csv += '\n\n\n'
     return csv
 
+def find_nth(haystack, needle, n):
+    # https://stackoverflow.com/questions/1883980/find-the-nth-occurrence-of-substring-in-a-string
+    start = haystack.find(needle)
+    while start >= 0 and n > 1:
+        start = haystack.find(needle, start+len(needle))
+        n -= 1
+    return start
+
 def handler(event, context):
     logger.info(event)
     # get the bucket info 
@@ -165,6 +179,9 @@ def handler(event, context):
     json_key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'], encoding='utf-8')
     logger.info(f'Bucket is {bucket}')
     logger.info(f'Key for JSON is {json_key}')
+    # Get the amplify user from the prefix 
+    amplify_user = json_key[find_nth(json_key,"/",1)+1:find_nth(json_key,"/",2)]
+    logger.info(f'Amplify User is: {amplify_user}')
     json_content = get_json_s3(bucket, json_key)
     logger.info(f'Json Content is {json_content}')
     # Get contents of JSON 
@@ -173,7 +190,7 @@ def handler(event, context):
     output_path = '/tmp/s3_' + key
     file_path = '/tmp/' + key
     # Get and download the s3 object 
-    get_s3_object(bucket, key, file_path)
+    get_s3_object(bucket, "protected/"+amplify_user+"/"+key, file_path)
     # Check if file is image or pdf 
     if(json_content["file_type"] == 'pdf'):
         # Get the pages specified into a new file object 
@@ -183,8 +200,8 @@ def handler(event, context):
     elif(json_content["file_type"] == 'image'):
         img_arr = [file_path]
     response = textract_img(img_arr)
-    table_csv = get_table_csv_results(response, json_content["confidence"])
+    table_csv = get_table_csv_results(response, int(json_content["confidence"]))
     logger.info(table_csv)
-    output_key = 'csv/' + str(uuid.uuid4()) + '.csv'
+    output_key = 'private/'+ amplify_user + '/csv/' + json_content["keyName"] + '.csv'
     insert_into_s3(table_csv, OUTPUT_BUCKET, output_key)
     return {'result' : "Success", 'Output' : output_key} 
