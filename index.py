@@ -13,24 +13,20 @@ import glob
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-OUTPUT_BUCKET = os.getenv('S3_BUCKET')
-
 def get_pages(pdf_path, pages, output_path):
     logger.info(f'Getting Pages {pages}')
     logger.info(f'{pdf_path} to {output_path}')
     pdf_reader = PdfFileReader(pdf_path)
     pdf_writer = PdfFileWriter()
-    if not pages: 
+    if not pages or pages[0] == '': 
         # if user has not specified page numbers, extract from all pages
-        for page in range(pdf_reader.getNumPages):
+        for page in range(pdf_reader.getNumPages()):
             p = pdf_reader.getPage(page)
             pdf_writer.addPage(p)
             logger.info(f'Appending Page#{page}')
     else: 
         for page in pages: 
-            if not isinstance(page, int):
-                page = int(page)
-            p = pdf_reader.getPage(page-1)
+            p = pdf_reader.getPage(int(page)-1)
             pdf_writer.addPage(p)
             logger.info(f'Appending Page#{page}')
     with open(output_path, 'wb') as out: 
@@ -177,12 +173,12 @@ def handler(event, context):
     bucket = event['Records'][0]['s3']['bucket']['name']
     #get the file/key name
     json_key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'], encoding='utf-8')
-    logger.info(f'Bucket is {bucket}')
-    logger.info(f'Key for JSON is {json_key}')
     # Get the amplify user from the prefix 
     amplify_user = json_key[find_nth(json_key,"/",1)+1:find_nth(json_key,"/",2)]
-    logger.info(f'Amplify User is: {amplify_user}')
     json_content = get_json_s3(bucket, json_key)
+    logger.info(f'Bucket is {bucket}')
+    logger.info(f'Key for JSON is {json_key}')
+    logger.info(f'Amplify User is: {amplify_user}')
     logger.info(f'Json Content is {json_content}')
     # Get contents of JSON 
     key = json_content["key"]
@@ -191,17 +187,17 @@ def handler(event, context):
     file_path = '/tmp/' + key
     # Get and download the s3 object 
     get_s3_object(bucket, "protected/"+amplify_user+"/"+key, file_path)
-    # Check if file is image or pdf 
+    # Check if file is PDF or Image type (JPEG, JPG, or PNG)
     if(json_content["file_type"] == 'pdf'):
         # Get the pages specified into a new file object 
         get_pages(file_path, json_content["pages"], output_path)
         # Convert the PDF to images 
         img_arr = convert_to_imgs(output_path)
-    elif(json_content["file_type"] == 'image'):
+    elif(json_content["file_type"] == 'jpeg' or json_content["file_type"] == 'jpg' or json_content["file_type"] == 'png'):
         img_arr = [file_path]
     response = textract_img(img_arr)
     table_csv = get_table_csv_results(response, int(json_content["confidence"]))
     logger.info(table_csv)
-    output_key = 'private/'+ amplify_user + '/csv/' + json_content["keyName"] + '.csv'
-    insert_into_s3(table_csv, OUTPUT_BUCKET, output_key)
+    output_key = 'protected/'+ amplify_user + '/csv/' + json_content["keyName"] + '.csv'
+    insert_into_s3(table_csv, bucket, output_key)
     return {'result' : "Success", 'Output' : output_key} 
