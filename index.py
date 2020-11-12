@@ -21,16 +21,25 @@ def get_pages(pdf_path, pages, output_path):
     if not pages or pages[0] == '': 
         # if user has not specified page numbers, extract from all pages
         for page in range(pdf_reader.getNumPages()):
-            p = pdf_reader.getPage(page)
-            pdf_writer.addPage(p)
-            logger.info(f'Appending Page#{page}')
+            write_page(pdf_reader, pdf_writer, page)
     else: 
+        # otherwise process the page numbers 
         for page in pages: 
-            p = pdf_reader.getPage(int(page)-1)
-            pdf_writer.addPage(p)
-            logger.info(f'Appending Page#{page}')
+            if (page.find("-") != -1):
+                # format of page_start - page_end
+                pgs = page.split('-')
+                logger.info(pgs)
+                for pg in range(int(pgs[0]),int(pgs[1])+1):
+                    write_page(pdf_reader, pdf_writer, int(pg)-1)
+            else: 
+                write_page(pdf_reader, pdf_writer, int(page)-1)
     with open(output_path, 'wb') as out: 
         pdf_writer.write(out)
+
+def write_page(reader, writer, page):
+    pg = reader.getPage(page)
+    writer.addPage(pg)
+    logger.info(f'Appending Page#{page}')
 
 def convert_to_imgs(pdf_path):
     logger.info("Converting PDF to Images")
