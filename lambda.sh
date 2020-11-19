@@ -1,6 +1,13 @@
 #
 # lambda.sh
 # For Linux Environment 
+# Used for updating lambda function
+# Assumption: lambda function has already been created using create_lambda.sh or create_lambda.bat 
+# Assumption: Uses the same environment as Python3.8 found in AWS Lambda 
+# See https://docs.aws.amazon.com/lambda/latest/dg/lambda-python.html for more information on the environment to use  
+
+echo "Please enter lambda function to update"
+read LAMBDA_NAME
 
 # Clean up before starting
 rm -rf env/
@@ -35,4 +42,5 @@ cd ..
 rm -rf package/
 
 # Updating lambda function
-aws lambda update-function --function-name $LAMBDANAME --zip-file fileb://function.zip
+# Read More at: https://docs.aws.amazon.com/lambda/latest/dg/python-package.html
+aws lambda update-function --function-name $LAMBDA_NAME --zip-file fileb://function.zip
