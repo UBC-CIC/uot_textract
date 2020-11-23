@@ -3,6 +3,8 @@ echo "Please enter your account ID"
 read ACCT_ID
 echo "Enter name for lambda function"
 read LAMBDA_NAME 
+echo "Enter name of DynamoDB Table"
+read DYNAMO_NAME
 
 # Cleaning AWS function if exists
 aws lambda delete-function --function-name $LAMBDA_NAME --region ca-central-1
@@ -11,6 +13,7 @@ aws lambda delete-function --function-name $LAMBDA_NAME --region ca-central-1
 aws iam detach-role-policy --policy-arn arn:aws:iam::aws:policy/AWSLambdaFullAccess --role-name pdf-textract-role
 aws iam detach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonTextractFullAccess --role-name pdf-textract-role
 aws iam detach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess --role-name pdf-textract-role
+aws iam detach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess --role-name pdf-textract-role
 aws iam delete-role --role-name pdf-textract-role
 
 # Creating IAM Role
@@ -18,6 +21,7 @@ aws iam create-role --role-name pdf-textract-role --assume-role-policy-document 
 aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AWSLambdaFullAccess --role-name pdf-textract-role
 aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonTextractFullAccess --role-name pdf-textract-role
 aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess --role-name pdf-textract-role
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess --role-name pdf-textract-role
 
 sleep 5
 
@@ -29,6 +33,7 @@ aws lambda create-function --function-name $LAMBDA_NAME \
                         --description "Convert PDF to CSV tables" \
                         --timeout 150 \
                         --region ca-central-1 \
+                        --environment Variables={DYNAMO_TABLE_NAME=$DYNAMO_NAME} \
                         --role arn:aws:iam::$ACCT_ID:role/pdf-textract-role \
                         --publish \
-                        --zip-file fileb://function.zip \
+                        --zip-file fileb://function.zip

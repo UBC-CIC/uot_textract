@@ -1,5 +1,5 @@
 import boto3 
-from botocore.exceptions import ClientError
+import botocore 
 from PyPDF4 import PdfFileReader, PdfFileWriter
 import pdf2image 
 import time 
@@ -12,6 +12,8 @@ import glob
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+DYNAMOTABLE= os.getenv('DYNAMO_TABLE_NAME')
 
 def get_pages(pdf_path, pages, output_path):
     logger.info(f'Getting Pages {pages}')
@@ -194,19 +196,55 @@ def handler(event, context):
     logger.info(f'Key for file is {key}')
     output_path = '/tmp/s3_' + key
     file_path = '/tmp/' + key
-    # Get and download the s3 object 
-    get_s3_object(bucket, "protected/"+amplify_user+"/"+key, file_path)
-    # Check if file is PDF or Image type (JPEG, JPG, or PNG)
-    if(json_content["file_type"] == 'pdf'):
-        # Get the pages specified into a new file object 
-        get_pages(file_path, json_content["pages"], output_path)
-        # Convert the PDF to images 
-        img_arr = convert_to_imgs(output_path)
-    elif(json_content["file_type"] == 'jpeg' or json_content["file_type"] == 'jpg' or json_content["file_type"] == 'png'):
-        img_arr = [file_path]
-    response = textract_img(img_arr)
-    table_csv = get_table_csv_results(response, int(json_content["confidence"]))
-    logger.info(table_csv)
-    output_key = 'protected/'+ amplify_user + '/csv/' + json_content["keyName"] + '.csv'
-    insert_into_s3(table_csv, bucket, output_key)
-    return {'result' : "Success", 'Output' : output_key} 
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(DYNAMOTABLE)
+    try: 
+        # Get and download the s3 object 
+        get_s3_object(bucket, "protected/"+amplify_user+"/"+key, file_path)
+        # Check if file is PDF or Image type (JPEG, JPG, or PNG)
+        if(json_content["file_type"] == 'pdf'):
+            # Get the pages specified into a new file object 
+            get_pages(file_path, json_content["pages"], output_path)
+            # Convert the PDF to images 
+            img_arr = convert_to_imgs(output_path)
+        elif(json_content["file_type"] == 'jpeg' or json_content["file_type"] == 'jpg' or json_content["file_type"] == 'png'):
+            img_arr = [file_path]
+        response = textract_img(img_arr)
+        table_csv = get_table_csv_results(response, int(json_content["confidence"]))
+        logger.info(table_csv)
+        output_key = 'protected/'+ amplify_user + '/csv/' + json_content["keyName"] + '.csv'
+        insert_into_s3(table_csv, bucket, output_key)
+        table.update_item(
+            Key={'id': key},
+            UpdateExpression='set #status = :status',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={':status': 'Success'}
+        )
+        return {'result' : "Success", 'Output' : output_key} 
+    except IndexError: 
+        logger.info("Index Error")
+        table.update_item(
+            Key={'id': key},
+            UpdateExpression='set #status = :status, #err = :err',
+            ExpressionAttributeNames={'#status': 'status', '#err': 'errorMessage'},
+            ExpressionAttributeValues={':status': 'Error', ':err': 'Page out of range'}
+        )
+        return {'result': 'Error'}
+    except (botocore.exceptions.ClientError, botocore.exceptions.ParamValidationError):
+        logger.info("Botocore error")
+        table.update_item(
+            Key={'id': key},
+            UpdateExpression='set #status = :status, #err = :err',
+            ExpressionAttributeNames={'#status': 'status', '#err': 'errorMessage'},
+            ExpressionAttributeValues={':status': 'Error', ':err': 'AWS Botocore Error'}
+        )
+        return {'result': 'Error'}
+    except: 
+        logger.info("Error")
+        table.update_item(
+            Key={'id': key},
+            UpdateExpression='set #status = :status, #err = :err',
+            ExpressionAttributeNames={'#status': 'status', '#err': 'errorMessage'},
+            ExpressionAttributeValues={':status': 'Error', ':err': 'Could not convert data'}
+        )
+        return {'result': 'Error'}
